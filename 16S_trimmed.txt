@@ -1,0 +1,343 @@
+##cut primers
+###using cutadapt?
+#file saved under cutadapt.sh; not sure how to make this script work. (need to review running scripts). i typed code in line by line.
+for R1 in *R1*
+do
+   R2=${R1//R1_001.fastq/R2_001.fastq}
+   R1output=${R1//.fastq/_out.fastq}
+   R2output=${R2//.fastq/_out.fastq}
+   ~/.local/bin/cutadapt -a CCTACGGGNGGCWGCAG...GGATTAGATACCCBDGTAGTC -A GACTACHVGGGTATCTAATCC...CTGCWGCCNCCCGTAGG --discard-untrimmed -o $R1output -p $R2output $R1 $R2
+done
+
+# to run cutadapt
+~/.local/bin/cutadapt 
+
+#Before cutadapt 37185525 sequences after make.contigs; after cutadapt 36639841 after make.contigs; loss of 1.5% of sequences
+
+#check quality using fastqc
+#opened interactive session on ACF
+
+fastqc -t 16 /lustre/haven/gamma/Emmons1/BoneSurface/16S_raw_data/*.gz -o ./fastqc
+#-t refers to threads
+# -o refers to where the output files should go
+
+#view summary stats using multiqc
+#downloaded to big laptop
+#separate reports by forward and reverse reads
+multiqc ./*R1_001_fastqc.zip
+multiqc ./*R2_001_fastqc.zip
+
+#fastqc data and multiqc report found in the following directory
+/mnt/c/Users/aemmons/Documents/16S_Surface/fastqc
+
+#check quality of trimmed sequences through cutadapt
+/lustre/hav/gamma/Emmons1/BoneSurface/16S_trim
+
+#use trimmomatic to trim based on quality and remove primers # could also use cutadapt to remove primers
+for R1 in *R1*
+do
+   R2=${R1//R1_001.fastq/R2_001.fastq}
+   R1paired=${R1//.fastq/_paired.fastq.gz}
+   R1unpaired=${R1//.fastq/_unpaired.fastq.gz}	
+   R2paired=${R2//.fastq/_paired.fastq.gz}
+   R2unpaired=${R2//.fastq/_unpaired.fastq.gz}	
+   java -jar ~/Trimmomatic-0.36/trimmomatic-0.36.jar PE -threads 6  $R1 $R2 $R1paired $R1unpaired $R2paired $R2unpaired LEADING:15 TRAILING:10 SLIDINGWINDOW:4:20 MINLEN:150 
+done
+
+trimmed files on home desktop
+
+#after using trimmomatic, 20840270 sequences after make.contigs; total loss from after cutadapt was 43.1% of sequences. Reverse reads had a significant drop in quality. 68-80 % of sequences were retained from both forward and reverse reads
+#it is likely there were problems with read overlap which influenced further loss after make.contigs.
+
+
+#Begin mothur analysis
+set.dir(input=/mnt/f/Emmo_GoogleDrive/BoneSurfaceProject/16S_Data/raw_trim/mothur_trimmed/paired, output=/mnt/f/Emmo_GoogleDrive/BoneSurfaceProject/16S_Data/raw_trim/mothur_trimmed/analysis) 
+make.contigs(file=stability.files.trim.txt, processors=6)
+
+Total of all groups is 20840270
+
+Output File Names:
+/mnt/f/Emmo_GoogleDrive/BoneSurfaceProject/16S_Data/raw_trim/mothur_trimmed/analysis/stability.files.trim.trim.contigs.fasta
+/mnt/f/Emmo_GoogleDrive/BoneSurfaceProject/16S_Data/raw_trim/mothur_trimmed/analysis/stability.files.trim.trim.contigs.qual
+/mnt/f/Emmo_GoogleDrive/BoneSurfaceProject/16S_Data/raw_trim/mothur_trimmed/analysis/stability.files.trim.contigs.report
+/mnt/f/Emmo_GoogleDrive/BoneSurfaceProject/16S_Data/raw_trim/mothur_trimmed/analysis/stability.files.trim.scrap.contigs.fasta
+/mnt/f/Emmo_GoogleDrive/BoneSurfaceProject/16S_Data/raw_trim/mothur_trimmed/analysis/stability.files.trim.scrap.contigs.qual
+/mnt/f/Emmo_GoogleDrive/BoneSurfaceProject/16S_Data/raw_trim/mothur_trimmed/analysis/stability.files.trim.contigs.groups
+
+[WARNING]: your sequence names contained ':'.  I changed them to '_' to avoid problems in your downstream analysis.
+
+#Prior to trimming using trimmomatic there were 36639841 groups. 
+
+set.dir(input=/mnt/f/Emmo_GoogleDrive/BoneSurfaceProject/16S_Data/raw_trim/mothur_trimmed/analysis, output=/mnt/f/Emmo_GoogleDrive/BoneSurfaceProject/16S_Data/raw_trim/mothur_trimmed/analysis) 
+summary.seqs(fasta=stability.files.trim.trim.contigs.fasta)
+
+
+Using 6 processors.
+
+                Start   End     NBases  Ambigs  Polymer NumSeqs
+Minimum:        1       150     150     0       2       1
+2.5%-tile:      1       290     290     0       4       521007
+25%-tile:       1       402     402     0       4       5210068
+Median:         1       407     407     0       5       10420136
+75%-tile:       1       422     422     0       5       15630203
+97.5%-tile:     1       427     427     22      6       20319264
+Maximum:        1       563     563     73      280     20840270
+Mean:   1       396.68  396.68  2.67256 4.62156
+# of Seqs:      20840270
+
+Output File Names:
+/mnt/f/Emmo_GoogleDrive/BoneSurfaceProject/16S_Data/raw_trim/mothur_trimmed/analysis/stability.files.trim.trim.contigs.summary
+
+It took 259 secs to summarize 20840270 sequences.
+
+screen.seqs(fasta=stability.files.trim.trim.contigs.fasta, group=stability.files.trim.contigs.groups, maxambig=0, maxlength=450)
+Output File Names:
+/mnt/f/Emmo_GoogleDrive/BoneSurfaceProject/16S_Data/raw_trim/mothur_trimmed/analysis/stability.files.trim.trim.contigs.good.fasta
+/mnt/f/Emmo_GoogleDrive/BoneSurfaceProject/16S_Data/raw_trim/mothur_trimmed/analysis/stability.files.trim.trim.contigs.bad.accnos
+/mnt/f/Emmo_GoogleDrive/BoneSurfaceProject/16S_Data/raw_trim/mothur_trimmed/analysis/stability.files.trim.contigs.good.groups
+
+
+It took 746 secs to screen 20840270 sequences.
+
+summary.seqs()
+                Start   End     NBases  Ambigs  Polymer NumSeqs
+Minimum:        1       150     150     0       3       1
+2.5%-tile:      1       401     401     0       4       402300
+25%-tile:       1       403     403     0       4       4022999
+Median:         1       407     407     0       5       8045998
+75%-tile:       1       427     427     0       5       12068997
+97.5%-tile:     1       427     427     0       6       15689696
+Maximum:        1       450     450     0       259     16091995
+Mean:   1       413.259 413.259 0       4.65062
+# of Seqs:      16091995
+
+unique.seqs(fasta=stability.files.trim.trim.contigs.good.fasta)
+Output File Names:
+/mnt/f/Emmo_GoogleDrive/BoneSurfaceProject/16S_Data/raw_trim/mothur_trimmed/analysis/stability.files.trim.trim.contigs.good.names
+/mnt/f/Emmo_GoogleDrive/BoneSurfaceProject/16S_Data/raw_trim/mothur_trimmed/analysis/stability.files.trim.trim.contigs.good.unique.fasta
+
+
+count.seqs(name=stability.files.trim.trim.contigs.good.names, group=stability.files.trim.contigs.good.groups)
+Output File Names:
+/mnt/f/Emmo_GoogleDrive/BoneSurfaceProject/16S_Data/raw_trim/mothur_trimmed/analysis/stability.files.trim.trim.contigs.good.count_table
+
+summary.seqs(fasta=stability.files.trim.trim.contigs.good.unique.fasta, count=stability.files.trim.trim.contigs.good.count_table, processors=4)
+                Start   End     NBases  Ambigs  Polymer NumSeqs
+Minimum:        1       150     150     0       3       1
+2.5%-tile:      1       401     401     0       4       402300
+25%-tile:       1       403     403     0       4       4022999
+Median:         1       407     407     0       5       8045998
+75%-tile:       1       427     427     0       5       12068997
+97.5%-tile:     1       427     427     0       6       15689696
+Maximum:        1       450     450     0       259     16091995
+Mean:   1       413.259 413.259 0       4.65062
+# of unique seqs:       3531690
+total # of seqs:        16091995
+
+
+align.seqs(fasta=stability.files.trim.trim.contigs.good.unique.fasta, reference=silva.bacteria.v3.v4.fasta, processors=4)
+Output File Names:
+/mnt/f/Emmo_GoogleDrive/BoneSurfaceProject/16S_Data/raw_trim/mothur_trimmed/analysis/stability.files.trim.trim.contigs.good.unique.align
+/mnt/f/Emmo_GoogleDrive/BoneSurfaceProject/16S_Data/raw_trim/mothur_trimmed/analysis/stability.files.trim.trim.contigs.good.unique.align.report
+/mnt/f/Emmo_GoogleDrive/BoneSurfaceProject/16S_Data/raw_trim/mothur_trimmed/analysis/stability.files.trim.trim.contigs.good.unique.flip.accnos
+
+summary.seqs(fasta=stability.files.trim.trim.contigs.good.unique.align, count=stability.files.trim.trim.contigs.good.count_table, processors=6)
+               Start   End     NBases  Ambigs  Polymer NumSeqs
+Minimum:        0       0       0       0       1       1
+2.5%-tile:      2       17012   400     0       4       402300
+25%-tile:       2       17012   402     0       4       4022999
+Median:         2       17012   406     0       5       8045998
+75%-tile:       2       17012   426     0       5       12068997
+97.5%-tile:     2       17012   426     0       6       15689696
+Maximum:        17012   17012   449     0       211     16091995
+Mean:   17.3194 17000.7 411.999 0       4.64926
+# of unique seqs:       3531690
+total # of seqs:        16091995
+
+Output File Names:
+/mnt/f/Emmo_GoogleDrive/BoneSurfaceProject/16S_Data/raw_trim/mothur_trimmed/analysis/stability.files.trim.trim.contigs.good.unique.summary
+
+
+
+screen.seqs(fasta=stability.files.trim.trim.contigs.good.unique.align, count=stability.files.trim.trim.contigs.good.count_table, summary=stability.files.trim.trim.contigs.good.unique.summary, start=2, end=17012, maxhomop=8)
+Output File Names:
+/mnt/f/Emmo_GoogleDrive/BoneSurfaceProject/16S_Data/raw_trim/mothur_trimmed/analysis/stability.files.trim.trim.contigs.good.unique.good.summary
+/mnt/f/Emmo_GoogleDrive/BoneSurfaceProject/16S_Data/raw_trim/mothur_trimmed/analysis/stability.files.trim.trim.contigs.good.unique.good.align
+/mnt/f/Emmo_GoogleDrive/BoneSurfaceProject/16S_Data/raw_trim/mothur_trimmed/analysis/stability.files.trim.trim.contigs.good.unique.bad.accnos
+/mnt/f/Emmo_GoogleDrive/BoneSurfaceProject/16S_Data/raw_trim/mothur_trimmed/analysis/stability.files.trim.trim.contigs.good.good.count_table
+
+
+summary.seqs(fasta=current, count=current)
+            Start   End     NBases  Ambigs  Polymer NumSeqs
+Minimum:        1       17012   353     0       3       1
+2.5%-tile:      2       17012   400     0       4       397449
+25%-tile:       2       17012   402     0       4       3974485
+Median:         2       17012   406     0       5       7948970
+75%-tile:       2       17012   426     0       5       11923454
+97.5%-tile:     2       17012   426     0       6       15500490
+Maximum:        2       17012   449     0       8       15897938
+Mean:   1.99999 17012   412.554 0       4.6481
+# of unique seqs:       3381974
+total # of seqs:        15897938
+
+Output File Names:
+/mnt/f/Emmo_GoogleDrive/BoneSurfaceProject/16S_Data/raw_trim/mothur_trimmed/analysis/stability.files.trim.trim.contigs.good.unique.good.summary
+
+It took 2498 secs to summarize 15897938 sequences.
+
+
+filter.seqs(fasta=stability.files.trim.trim.contigs.good.unique.good.align, vertical=T, trump=., processors=6)
+Length of filtered alignment: 1342
+Number of columns removed: 15670
+Length of the original alignment: 17012
+Number of sequences used to construct filter: 3381974
+
+Output File Names:
+/mnt/f/Emmo_GoogleDrive/BoneSurfaceProject/16S_Data/raw_trim/mothur_trimmed/analysis/stability.filter
+/mnt/f/Emmo_GoogleDrive/BoneSurfaceProject/16S_Data/raw_trim/mothur_trimmed/analysis/stability.files.trim.trim.contigs.good.unique.good.filter.fasta
+
+
+unique.seqs(fasta=stability.files.trim.trim.contigs.good.unique.good.filter.fasta, count=stability.files.trim.trim.contigs.good.good.count_table)
+Output File Names:
+/mnt/f/Emmo_GoogleDrive/BoneSurfaceProject/16S_Data/raw_trim/mothur_trimmed/analysis/stability.files.trim.trim.contigs.good.unique.good.filter.count_table
+/mnt/f/Emmo_GoogleDrive/BoneSurfaceProject/16S_Data/raw_trim/mothur_trimmed/analysis/stability.files.trim.trim.contigs.good.unique.good.filter.unique.fasta
+
+summary.seqs(fasta=current, count=current)
+
+Using 6 processors.
+
+                Start   End     NBases  Ambigs  Polymer NumSeqs
+Minimum:        1       1342    353     0       3       1
+2.5%-tile:      1       1342    400     0       4       397449
+25%-tile:       1       1342    402     0       4       3974485
+Median:         1       1342    406     0       5       7948970
+75%-tile:       1       1342    426     0       5       11923454
+97.5%-tile:     1       1342    426     0       6       15500490
+Maximum:        1       1342    449     0       8       15897938
+Mean:   1       1342    412.554 0       4.6481
+# of unique seqs:       3367924
+total # of seqs:        15897938
+
+Output File Names:
+/mnt/f/Emmo_GoogleDrive/BoneSurfaceProject/16S_Data/raw_trim/mothur_trimmed/analysis/stability.files.trim.trim.contigs.good.unique.good.filter.unique.summary
+
+It took 184 secs to summarize 15897938 sequences.
+
+pre.cluster(fasta=stability.files.trim.trim.contigs.good.unique.good.filter.unique.fasta, count=stability.files.trim.trim.contigs.good.unique.good.filter.count_table, diffs=2, processors=1)
+Using 1 processors.
+/mnt/f/Emmo_GoogleDrive/BoneSurfaceProject/16S_Data/raw_trim/mothur_trimmed/analysis/stability.files.trim.trim.contigs.good.unique.good.filter.unique.precluster.fasta
+/mnt/f/Emmo_GoogleDrive/BoneSurfaceProject/16S_Data/raw_trim/mothur_trimmed/analysis/stability.files.trim.trim.contigs.good.unique.good.filter.unique.precluster.count_table
+                Start   End     NBases  Ambigs  Polymer NumSeqs
+Minimum:        1       1342    353     0       3       1
+2.5%-tile:      1       1342    400     0       4       397449
+25%-tile:       1       1342    402     0       4       3974485
+Median:         1       1342    406     0       5       7948970
+75%-tile:       1       1342    426     0       5       11923454
+97.5%-tile:     1       1342    426     0       6       15500490
+Maximum:        1       1342    449     0       8       15897938
+Mean:   1       1342    412.559 0       4.64566
+# of unique seqs:       1146153
+total # of seqs:        15897938
+
+Output File Names:
+/mnt/f/Emmo_GoogleDrive/BoneSurfaceProject/16S_Data/raw_trim/mothur_trimmed/analysis/stability.files.trim.trim.contigs.good.unique.good.filter.unique.precluster.summary
+
+
+
+
+chimera.vsearch(fasta=stability.files.trim.trim.contigs.good.unique.good.filter.unique.precluster.fasta, count=stability.files.trim.trim.contigs.good.unique.good.filter.unique.precluster.count_table, dereplicate=t, processors=6)
+Output File Names:
+/mnt/f/Emmo_GoogleDrive/BoneSurfaceProject/16S_Data/raw_trim/mothur_trimmed/analysis/stability.files.trim.trim.contigs.good.unique.good.filter.unique.precluster.denovo.vsearch.pick.count_table
+/mnt/f/Emmo_GoogleDrive/BoneSurfaceProject/16S_Data/raw_trim/mothur_trimmed/analysis/stability.files.trim.trim.contigs.good.unique.good.filter.unique.precluster.denovo.vsearch.chimeras
+/mnt/f/Emmo_GoogleDrive/BoneSurfaceProject/16S_Data/raw_trim/mothur_trimmed/analysis/stability.files.trim.trim.contigs.good.unique.good.filter.unique.precluster.denovo.vsearch.accnos
+
+
+remove.seqs(fasta=stability.files.trim.trim.contigs.good.unique.good.filter.unique.precluster.fasta, accnos=stability.files.trim.trim.contigs.good.unique.good.filter.unique.precluster.denovo.vsearch.accnos)
+Removed 452916 sequences from your fasta file.
+
+Output File Names:
+/mnt/f/Emmo_GoogleDrive/BoneSurfaceProject/16S_Data/raw_trim/mothur_trimmed/analysis/stability.files.trim.trim.contigs.good.unique.good.filter.unique.precluster.pick.fasta
+
+
+summary.seqs(fasta=current, count=current)
+
+                Start   End     NBases  Ambigs  Polymer NumSeqs
+Minimum:        1       1342    353     0       3       1
+2.5%-tile:      1       1342    400     0       4       374139
+25%-tile:       1       1342    402     0       4       3741389
+Median:         1       1342    406     0       5       7482777
+75%-tile:       1       1342    426     0       5       11224165
+97.5%-tile:     1       1342    426     0       6       14591415
+Maximum:        1       1342    449     0       8       14965553
+Mean:   1       1342    412.605 0       4.64529
+# of unique seqs:       693237
+total # of seqs:        14965553
+
+Output File Names:
+/mnt/f/Emmo_GoogleDrive/BoneSurfaceProject/16S_Data/raw_trim/mothur_trimmed/analysis/stability.files.trim.trim.contigs.good.unique.good.filter.unique.precluster.pick.summary
+
+It took 15 secs to summarize 14965553 sequences.
+
+classify.seqs(fasta=stability.files.trim.trim.contigs.good.unique.good.filter.unique.precluster.pick.fasta, count=stability.files.trim.trim.contigs.good.unique.good.filter.unique.precluster.denovo.vsearch.pick.count_table, reference=silva.bacteria.v3.v4.fasta, taxonomy=silva.nr_v128.tax, cutoff=80, processors=6)
+It took 49 secs to create the summary file for 693237 sequences.
+
+Output File Names:
+/mnt/f/Emmo_GoogleDrive/BoneSurfaceProject/16S_Data/raw_trim/mothur_trimmed/analysis/stability.files.trim.trim.contigs.good.unique.good.filter.unique.precluster.pick.nr_v128.wang.taxonomy
+/mnt/f/Emmo_GoogleDrive/BoneSurfaceProject/16S_Data/raw_trim/mothur_trimmed/analysis/stability.files.trim.trim.contigs.good.unique.good.filter.unique.precluster.pick.nr_v128.wang.tax.summary
+
+
+remove.lineage(fasta=stability.files.trim.trim.contigs.good.unique.good.filter.unique.precluster.pick.fasta, count=stability.files.trim.trim.contigs.good.unique.good.filter.unique.precluster.denovo.vsearch.pick.count_table, taxonomy=stability.files.trim.trim.contigs.good.unique.good.filter.unique.precluster.pick.nr_v128.wang.taxonomy, taxon=Chloroplast-Mitochondria-Archaea-Eukaryota-unknown)
+Output File Names:
+/mnt/f/Emmo_GoogleDrive/BoneSurfaceProject/16S_Data/raw_trim/mothur_trimmed/analysis/stability.files.trim.trim.contigs.good.unique.good.filter.unique.precluster.pick.nr_v128.wang.pick.taxonomy
+/mnt/f/Emmo_GoogleDrive/BoneSurfaceProject/16S_Data/raw_trim/mothur_trimmed/analysis/stability.files.trim.trim.contigs.good.unique.good.filter.unique.precluster.pick.pick.fasta
+/mnt/f/Emmo_GoogleDrive/BoneSurfaceProject/16S_Data/raw_trim/mothur_trimmed/analysis/stability.files.trim.trim.contigs.good.unique.good.filter.unique.precluster.denovo.vsearch.pick.pick.count_table
+
+
+summary.tax(taxonomy=current, count=current)
+
+It took 41 secs to create the summary file for 14958201 sequences.
+
+
+Output File Names:
+/mnt/f/Emmo_GoogleDrive/BoneSurfaceProject/16S_Data/raw_trim/mothur_trimmed/analysis/stability.files.trim.trim.contigs.good.unique.good.filter.unique.precluster.pick.nr_v128.wang.pick.tax.summary
+
+
+                Start   End     NBases  Ambigs  Polymer NumSeqs
+Minimum:        1       1342    353     0       3       1
+2.5%-tile:      1       1342    400     0       4       373956
+25%-tile:       1       1342    402     0       4       3739551
+Median:         1       1342    406     0       5       7479101
+75%-tile:       1       1342    426     0       5       11218651
+97.5%-tile:     1       1342    426     0       6       14584246
+Maximum:        1       1342    449     0       8       14958201
+Mean:   1       1342    412.616 0       4.64469
+# of unique seqs:       692709
+total # of seqs:        14958201
+
+Output File Names:
+/mnt/f/Emmo_GoogleDrive/BoneSurfaceProject/16S_Data/raw_trim/mothur_trimmed/analysis/stability.files.trim.trim.contigs.good.unique.good.filter.unique.precluster.pick.pick.summary
+
+It took 15 secs to summarize 14958201 sequences.
+
+cluster.split(fasta=stability.files.trim.trim.contigs.good.unique.good.filter.unique.precluster.pick.pick.fasta, count=stability.files.trim.trim.contigs.good.unique.good.filter.unique.precluster.denovo.vsearch.pick.pick.count_table, taxonomy=stability.files.trim.trim.contigs.good.unique.good.filter.unique.precluster.pick.nr_v128.wang.pick.taxonomy, splitmethod=classify, taxlevel=4, cutoff=0.03, processors=6)
+###sens.spec(cutoff=0.03, list=/mnt/f/Emmo_GoogleDrive/BoneSurfaceProject/16S_Data/raw_trim/mothur_trimmed/analysis/stability.files.trim.trim.contigs.good.unique.good.filter.unique.precluster.pick.pick.opti_mcc.unique_list.list, column=/mnt/f/Emmo_GoogleDrive/BoneSurfaceProject/16S_Data/raw_trim/mothur_trimmed/analysis/stability.files.trim.trim.contigs.good.unique.good.filter.unique.precluster.pick.pick.dist, count=/mnt/f/Emmo_GoogleDrive/BoneSurfeProject/16S_Data/raw_trim/mothur_trimmed/analysis/stability.files.trim.trim.contigs.good.unique.good.filter.unique.precluster.denovo.vsearch.pick.pick.count_table)
+#ignore; perhaps i do not need what this makes
+
+
+make.shared(list=stability.files.trim.trim.contigs.good.unique.good.filter.unique.precluster.pick.pick.opti_mcc.unique_list.list, count=stability.files.trim.trim.contigs.good.unique.good.filter.unique.precluster.denovo.vsearch.pick.pick.count_table, label=0.03, processors=6)
+Output File Names:
+/mnt/f/Emmo_GoogleDrive/BoneSurfaceProject/16S_Data/raw_trim/mothur_trimmed/analysis/stability.files.trim.trim.contigs.good.unique.good.filter.unique.precluster.pick.pick.opti_mcc.unique_list.shared
+
+
+classify.otu(list=stability.files.trim.trim.contigs.good.unique.good.filter.unique.precluster.pick.pick.opti_mcc.unique_list.list, count=stability.files.trim.trim.contigs.good.unique.good.filter.unique.precluster.denovo.vsearch.pick.pick.count_table, taxonomy=stability.files.trim.trim.contigs.good.unique.good.filter.unique.precluster.pick.nr_v128.wang.pick.taxonomy, label=0.03, processors=6)
+0.03    47697
+
+Output File Names:
+/mnt/f/Emmo_GoogleDrive/BoneSurfaceProject/16S_Data/raw_trim/mothur_trimmed/analysis/stability.files.trim.trim.contigs.good.unique.good.filter.unique.precluster.pick.pick.opti_mcc.unique_list.0.03.cons.taxonomy
+/mnt/f/Emmo_GoogleDrive/BoneSurfaceProject/16S_Data/raw_trim/mothur_trimmed/analysis/stability.files.trim.trim.contigs.good.unique.good.filter.unique.precluster.pick.pick.opti_mcc.unique_list.0.03.cons.tax.summary
+
+#Everything looks fine; should be able to pipe through phyloseq.
+
+
+
+
