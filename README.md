@@ -8,3 +8,6 @@ bone type and human DNA preservation.
 Types of data found in this repository:
 1. Code for sequencing analysis using cutadapt, trimmomatic, and mothur: 16S rRNA
 2. Code for sequencing analysis using cutadapt, trimmomatic, andmothur: 18S rRNA
+3. Metadata including sample codes, donor information, DNA concentrations (human, total, total bacterial).
+
+
