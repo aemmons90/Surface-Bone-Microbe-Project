@@ -1,0 +1,540 @@
+---
+title: "18S Trimmed Data Analysis"
+output:
+  html_document: 
+    keep_md: TRUE
+  
+
+date: 4 April 2018
+---
+##Introduction:
+Some of this code is from the following tutorial http://deneflab.github.io/MicrobeMiseq/demos/mothur_2_phyloseq.html#permanova.
+```{r}
+#Loading required packages
+library(phyloseq)
+packageVersion("phyloseq")
+library(biomformat)
+packageVersion("biomformat")
+library(ggplot2)
+packageVersion("ggplot2")
+library(vegan)
+library(dplyr)
+library(scales)
+library(grid)
+library(reshape2)
+library(S4Vectors)
+library("DESeq2")
+packageVersion("DESeq2")
+```
+
+```{r}
+#Setting plotting theme
+theme_set(theme_bw())
+```
+
+##Importing Data
+The data should be imported using phyloseq objects. A shared file, taxonomy file, and metadata file is needed.
+```{r}
+# Assign variables for imported data
+sharedfile = "stability_fungi_trim.trim.contigs.good.unique.good.filter.unique.precluster.pick.pick.opti_mcc.shared"
+taxfile = "18S2018/stability_fungi_trim.trim.contigs.good.unique.good.filter.unique.precluster.pick.pick.opti_mcc.0.03.cons.taxonomy"
+mapfile = "18S2018/Bone_Surface_metadata_18S.csv"
+
+```
+
+```{r}
+# Import mothur data
+mothur_data <- import_mothur(mothur_shared_file = sharedfile, mothur_constaxonomy_file = taxfile)
+
+# Import sample metadata
+map <- read.table(file = mapfile, sep = ',', header = TRUE)
+head(map)
+map$HumanCat<-as.factor(map$HumanCat)
+
+
+
+
+
+```
+In order for the PCoA and the NMDS to work, the variable cortical.content has to be transformed from an integer to a character vector.
+```{r}
+#make Cortical.Content into a character vector for later analysis
+map <- transform(map, Cortical.Category = as.character(Cortical.Category))
+map$SEQ.ID-> map$Sample.ID
+map <- sample_data(map)
+# Assign rownames to be Sample ID's
+rownames(map) <- map$Sample.ID
+
+```
+
+```{r}
+# Merge mothurdata object with sample 
+
+
+moth_merge <- merge_phyloseq(mothur_data, map)
+moth_merge
+
+
+colnames(tax_table(moth_merge))
+colnames(tax_table(moth_merge)) <- c("Kingdom", "Phylum", "Class", "Order", "Family", "Genus")
+
+```
+##Filtering 
+Unwanted taxa will be filtered out. Though this was already done in Mothur, it is suggested in the tutorial and can serve as a kind of check. 
+```{r}
+#Now we will filter out Eukaryotes, Archaea, chloroplasts and mitochondria,
+Bones1 <- moth_merge %>%
+  subset_taxa(Kingdom == "Eukaryota" & Phylum != "Vertebrata" & Family  != "mitochondria" & Class != "Chloroplast" & Phylum!= "Phragmoplastophyta")
+
+Bones1
+
+#remove individual A
+#Bones1<- subset_samples(Bones1, Individual != "A")
+Bones1<-prune_samples(sample_sums(Bones1)>=5000, Bones1)
+```
+##Sample Summary
+This provides a summary of read counts in the sample.
+```{r}
+# Make a data frame with a column for the read counts of each sample
+sample_sum_df <- data.frame(Sample = sample_names(Bones1), sum = sample_sums(Bones1))
+
+# Histogram of sample read counts
+ggplot(sample_sum_df, aes(x = sum)) + 
+  geom_histogram(color = "black", fill = "indianred", binwidth = 2500) +
+  ggtitle("Distribution of sample sequencing depth") + 
+  xlab("Read counts") +
+  theme(axis.title.y = element_blank())
+
+sample_sum_df1<- sample_sum_df %>%
+  arrange(sum)
+
+#Turn your 'treatment' column into a character vector
+sample_sum_df1$Sample <- as.character(sample_sum_df1$Sample)
+#Then turn it back into an ordered factor
+sample_sum_df1$Sample<- factor(sample_sum_df1$Sample, levels=unique(sample_sum_df1$Sample))
+
+ggplot(sample_sum_df1, aes(x = Sample, y=sum)) + 
+  geom_bar(stat= "Identity") +
+  ggtitle("Distribution of sample sequencing depth") + 
+  xlab("library") +
+  ylab("read counts")+
+  theme(axis.text.x = element_text(angle = 90, vjust=0.5, hjust = 1))
+
+
+
+# mean, max and min of sample read counts
+smin <- min(sample_sums(Bones1))
+smean <- mean(sample_sums(Bones1))
+smax <- max(sample_sums(Bones1))
+
+print(smin) 
+print(smean)
+print(smax)
+
+```
+
+```{r}
+#prune samples below 1000 reads. these seem to be outliers
+Bones2 = prune_samples(sample_sums(Bones1)>=5000, Bones1)
+smin2 <- min(sample_sums(Bones2))
+smean2 <- mean(sample_sums(Bones2))
+smax2 <- max(sample_sums(Bones2))
+
+sample_sum_df2 <- data.frame(Sample = sample_names(Bones2), sum = sample_sums(Bones2))
+
+ggplot(sample_sum_df2, aes(x = sum)) + 
+  geom_histogram(color = "black", fill = "indianred", binwidth = 2000) +
+  #ggtitle("Distribution of sample sequencing depth") + 
+  xlab("Read counts") +
+  ylab("Sample sum")
+  #theme(axis.title.y = element_blank())
+
+#ggsave("FigS2.png", height=3, width=5, units="in", dpi=300 )
+
+#Turn your 'treatment' column into a character vector
+sample_sum_df2$Sample <- as.character(sample_sum_df2$Sample)
+#Then turn it back into an ordered factor
+sample_sum_df2$Sample<- factor(sample_sum_df2$Sample, levels=unique(sample_sum_df2$Sample))
+
+ggplot(sample_sum_df2, aes(x = Sample, y=sum)) + 
+  geom_bar(stat= "Identity") +
+  #ggtitle("Distribution of sample sequencing depth") + 
+  xlab("library") +
+  ylab("read counts")+
+  theme(axis.text.x = element_text(angle = 90, vjust=0.5, hjust = 1))
+
+
+
+print(smin2) 
+print(smean2)
+print(smax2)
+
+
+```
+
+##Relative Abundance
+Stacked bar graphs can be created to look at relative abundance. Because an individual was removed, I did not average by individual for phyla. 
+
+```{r}
+##Stacked bar plots
+# melt to long format (for ggploting) 
+# prune out phyla below 2% in each sample
+Bones_class <- Bones2 %>%
+  tax_glom(taxrank = "Class") %>%                     # agglomerate at Phylum level
+  transform_sample_counts(function(x) {x/sum(x)} ) %>% # Transform to rel. abundance
+  psmelt() %>%                                         # Melt to long format
+  #filter(Abundance > 0.01)  %>%                       #this can be done after averaging by bone
+  arrange(Body.region, BONE.TYPE) %>% filter(Abundance > 0.01) 
+
+Bones_classfilt<-Bones_class  %>% filter(Abundance > 0.01)
+Bones_genusfilt<- Bones_genus %>% filter(Abundance > 0.01) %>%filter(Phylum %in% phyla)
+phyla<- c("Ascomycota", "Annelida","Basidiomycota", "Ciliophora","Incertae_sedis", "Cercozoa", "Peronosporomycetes", "Nematoda", "Crytomycota")
+
+#also take a look at genera
+Bones_genus <- Bones2 %>%
+  tax_glom(taxrank = "Genus") %>%                     # agglomerate at Phylum level
+  transform_sample_counts(function(x) {x/sum(x)} ) %>% # Transform to rel. abundance
+  psmelt() %>%                                         # Melt to long format
+  #filter(Abundance > 0.01)  %>%                       #this can be done after averaging by bone
+  arrange(Body.region, BONE.TYPE)
+
+arthropoda<- Bones_genus %>% filter(Phylum == "Arthropoda") %>% filter(Abundance>0.01)
+
+phrag<- Bones_genus %>% filter(Phylum=="Phragmoplastophyta") %>% filter(Abundance>0.01)
+
+#make sure these samples remain
+filtermap<- sample_data(Bones2)
+
+#there were two samples that did't sequence so the average for these will not be divided by three. See how many samples per bone type:
+map_Samp<- filtermap %>% filter(Individual != "A") %>% group_by(BONE.TYPE) %>% dplyr::summarise(n=n())
+
+
+#Average relative abundance of phyla by bone type. I have three replicates per treatment.need to first sum abundance by class to be divided by number of samples per group by merging data sets
+Bones_class_1 <- Bones_class %>%
+  arrange(OTU, Body.region, BONE.TYPE) %>%
+  group_by(Body.region, BONE.TYPE, Class) %>%
+  summarise(sum.rel.abund = sum(Abundance))
+
+merged<-merge(Bones_class_1, map_Samp)
+
+#creates average relative abundances
+  merged[["avg.rel.abund"]] <- merged[["sum.rel.abund"]] / merged[["n"]] 
+
+merged<-merged%>% arrange(Body.region, BONE.TYPE) %>%
+  filter(avg.rel.abund > 0.01)
+
+
+
+# Set colors for plotting #set palette instead?
+#class_colors <- c(
+#  "#CBD588", "#5F7FC7", "orange","#DA5724", "#508578", "#CD9BCD",
+# "#AD6F3B", "#673770","#D14285", "#652926", "#C84248", 
+#  "#8569D5", "#5E738F","#D1A33D", "#8A7C64", "#599861"
+#)
+
+#get more than 34 colors for graph; may need to manually choose colors for easy discrimination
+#cols<-colorRampPalette(c("red", "yellow", "blue", "forestgreen", "orange", #"grey", "purple", "hotpink", "orchid"))(40)
+
+library(RColorBrewer)
+n <- 83
+qual_col_pals = brewer.pal.info[brewer.pal.info$category == 'qual',]
+col_vector = unlist(mapply(brewer.pal, qual_col_pals$maxcolors, rownames(qual_col_pals)))
+pie(rep(1,n), col=sample(col_vector, n))
+
+# Plot #need to fix grid facet headers so that they fit
+ggplot(Bones_genusfilt, aes(x = BONE.TYPE, y = Abundance, fill = Genus)) + 
+  facet_grid(Individual*Phylum~Body.region, scales="free", space="free") +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = palette) + #pallete is from genus_plot.R file under 16S folder
+# Remove x axis title
+theme(axis.title.x = element_blank()) + 
+  guides(fill = guide_legend(reverse = TRUE, keywidth = 1, keyheight = 1)) +
+  ylab("Average Relative Abundance (Genus > 1%)") +
+ # ggtitle("Class Level Composition of Bone-Associated Eukaryotic Communities Averaged Across Individuals", size=10) +
+  theme(axis.text.x = element_text(angle = 90, vjust=0.5, hjust = 1)) +
+  theme(legend.position = "left") +
+  theme(text=element_text(size=10)) 
+
+################################################
+#Looking at Phyla
+Bones_phylum <- Bones2 %>%
+  tax_glom(taxrank = "Phylum") %>%                     # agglomerate at Phylum level
+  transform_sample_counts(function(x) {x/sum(x)} ) %>% # Transform to rel. abundance
+  psmelt() %>%                                         # Melt to long format
+  #filter(Abundance > 0.01)  %>%                       # Filter out low abundance taxa
+  arrange(Body.region, BONE.TYPE)
+
+#there were two samples that did't sequence so the average for these will not be divided by three. See how many samples per bone type:
+
+map_Samp2<- filtermap %>% group_by(BONE.TYPE) %>% dplyr::summarise(n=n())
+
+
+#Average relative abundance of phyla by bone type. I have three replicates per treatment.need to first sum abundance by class to be divided by number of samples per group by merging data sets
+Bones_phylum_1 <- Bones_phylum %>%
+  arrange(OTU, Individual,Body.region, BONE.TYPE) %>%
+  group_by(Individual,Body.region, BONE.TYPE, Phylum) %>%
+  summarise(avg.rel.abund = mean(Abundance))
+
+
+merged2<-Bones_phylum_1 %>% 
+  filter(avg.rel.abund > 0.01)
+
+#what if facet by individual
+notmerged<-Bones_phylum_1%>% arrange(Body.region, BONE.TYPE)%>%
+  filter(sum.rel.abund > 0.01)
+
+#which phyla are most represented
+merged3<-merged2 %>%
+  group_by(Phylum) %>%
+  summarize(max = max(avg.rel.abund), min = min(avg.rel.abund))
+
+#which phyla are most represented when not averaging by individual
+notmerged1<-notmerged %>%
+  group_by(Phylum) %>%
+  summarize(max = max(sum.rel.abund), min = min(sum.rel.abund), mean= mean(sum.rel.abund))
+
+
+
+# Set colors for plotting #set palette instead?
+#Phylum_colors <- c(
+#  "#CBD588", "#5F7FC7", "#508578", "#CD9BCD",
+# "#AD6F3B", "#673770", "red1", "yellow1", "#D14285", "#652926", "#C84248", 
+ # "#8569D5", "orchid4","#D1A33D", "#8A7C64", "#599861"
+#)
+
+#fix grid facet headers
+bodyRegion_names <- list(
+  'arm'= "Arm",
+  'foot'= "Foot",
+  'hand'= "Hand",
+  'leg'= "Leg",
+  'lower trunk'="Lower Trunk",
+  'skull'= "Skull",
+  'tooth'= "Tooth",
+  'upper trunk'= "Upper Trunk")
+
+region_labeller <- function(variable,value){
+  return(bodyRegion_names[value])
+}
+
+
+#reorder factor
+merged2$Body.region<-factor(merged2$Body.region, levels=c("skull", "tooth",
+                                                          "upper trunk", "arm", "hand", "lower trunk", "leg", "foot"))
+
+
+
+# Plot #need to fix grid facet headers so that they fit
+ggplot(merged2, aes(x = BONE.TYPE, y = avg.rel.abund, fill = Phylum)) + 
+  facet_grid(Individual~Body.region, scales="free", space="free") +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = col_vector) +
+# Remove x axis title
+  theme_classic()+
+theme(axis.title.x = element_blank()) + 
+  guides(fill = guide_legend(reverse = TRUE, keywidth = 0.5, keyheight = 0.5, ncol=5)) +
+  ylab("Relative Abundance (Phylum > 1%)") +
+  theme(axis.text.x = element_text(angle = 90, vjust=0.5, hjust = 1, size=8,
+                                   family="Times New Roman", color="black")) +
+  theme(legend.position = "bottom") +
+  #theme(legend.text=element_text(size=10, family="Times New Roman"))+
+  theme(axis.text.y=element_text(size=8), strip.text.x = element_text(size=8, angle=90),
+        axis.title.y=element_text(size=8))+
+  theme(legend.text = element_text(colour="black", size=8), 
+        legend.key.size = unit(0.25, "mm"), 
+        legend.title = element_text(size=8))+
+  theme(panel.spacing = unit(0.25, "lines"))
+  
+
+ggsave("eukaryFig5facet.png", height=7, width=6.5, units="in", dpi=300)
+
+```
+
+
+
+##Unconstrained Ordinations: PCoA
+
+Reads have to be scaled by even depth. 
+```{r}
+#try rarefy function rather than this custom function to rarefy to even depth
+
+
+set.seed(1)
+Bones_scale1 = rarefy_even_depth(Bones2, rngseed=3)
+
+
+smin3 <- min(sample_sums(Bones_scale1))
+smean3 <- mean(sample_sums(Bones_scale1))
+smax3 <- max(sample_sums(Bones_scale1))
+
+print(smin3)
+print(smean3)
+print(smax3)
+
+```
+```{r}
+# Ordinate
+Bones_pcoa <- ordinate(
+  physeq = Bones_scale1, 
+  method = "PCoA", 
+  distance = "bray"
+)
+
+```
+
+
+\
+
+
+### PCoA Microbial Eukaryotic Communities by Cortical Content and Individual
+```{r}
+plot_ordination(
+  physeq = Bones_scale1,
+  ordination = Bones_pcoa,
+  color = "Cortical",
+  shape= "Individual",
+  
+  title = "PCoA of Bone-Associated Eukaryotic Microbial Communities"
+) + 
+  scale_color_manual(values = c("#a65628", "red", "#ffae19",
+                                "#4daf4a", "#1919ff", "darkorchid3", "magenta", "darkmagenta")
+  ) +
+  geom_point(aes(color = Cortical), alpha = 0.7, size = 4) +
+  geom_point(colour = "grey90", size = 1.5) +
+  scale_shape_manual(values=c(15,16,17))
+
+```
+
+###PCoA Microbial Eukaryotic Communities by Bone Region and Individual
+```{r}
+#Compare by Bone.Region (PcOA)
+plot_ordination(
+  physeq = Bones_scale1,
+  ordination = Bones_pcoa,
+  color = "Body.region",
+  shape= "Individual"
+  
+  #title = "PCoA of Bone-Associated Microbial Eukaryotic Communities"
+) + 
+  scale_color_manual(values = c("#a65628", "red", "#ffae19",
+                                "#4daf4a", "#1919ff", "darkorchid3", "magenta", "darkmagenta")
+  ) +
+  geom_point(aes(color = Body.region), alpha = 0.7, size = 4) +
+  geom_point(colour = "grey90", size = 1.5) +
+  scale_shape_manual(values=c(15,16,17))+
+  theme(legend.title= element_blank())+
+  stat_ellipse(aes(group=Individual))
+  #facet_grid(~Individual)
+```
+
+###NMDS
+```{r}
+#Performing an NMDS analysis
+set.seed(1)
+
+# Ordinate
+Bones_nmds <- ordinate(
+  physeq = Bones_scale1, 
+  method = "NMDS", 
+  distance = "bray",
+  trymax = 200,
+  k=3
+)
+
+```
+According to the following website, https://mb3is.megx.net/gustame/dissimilarity-based-methods/nmds, 
+No pattern with cortical content as categorical variable
+
+###NMDS: Bone Region and Individual
+```{r}
+all1<-plot_ordination(
+    physeq = Bones_scale1,
+    ordination = Bones_nmds,
+    axes= 1:2,
+    color = "Individual",
+    shape = "Body.region"
+  ) + 
+  theme_classic()+
+  geom_point(aes(color = Individual), alpha = 0.7, size = 2.0) +
+  #geom_point(colour = "grey90", size = 1.5) +
+  scale_shape_manual(values=c(15,16,17,3,18,8,6,5))+ 
+ #facet_grid(~Individual)+
+  stat_ellipse(aes(group=Individual)) +
+  theme(legend.position = "none", legend.title= element_blank())
+
+all2<-plot_ordination(
+    physeq = Bones_scale1,
+    ordination = Bones_nmds,
+    axes= 3:2,
+    shape = "Body.region",
+    color= "Individual"
+  )  +
+  theme_classic()+
+  geom_point(aes(color = Individual), alpha = 0.7, size = 2.0) +
+  #geom_point(colour = "grey90", size = 0.1) +
+  scale_shape_manual(values=c(15,16,17,0,18,8,6,5)) +
+  #facet_grid(~Individual)+
+  stat_ellipse(aes(group=Individual)) +
+   theme(legend.position = "bottom", legend.title= element_blank())
+
+library(gridExtra)
+grid.arrange(all1, all2, nrow =2)
+#png("figeuk6.png", width=5, height=7, units= "in", res=300)
+#dev.off()
+
+
+
+
+```
+
+##Permanova
+```{r}
+set.seed(1)
+scale2<- subset_samples(Bones_scale1, !is.na(Cortical.Category))
+
+# Calculate bray curtis distance matrix
+Bones_bray <- phyloseq::distance(scale2, method = "bray")
+
+# make a data frame from the sample_data
+sampledf <- data.frame(sample_data(scale2))
+
+# Adonis test
+adonis(Bones_bray ~ Individual, data = sampledf)
+
+#Adonis test with interactions
+ adonis(Bones_bray ~ Individual*Body.region*HumanCat*Cortical.Category, data= sampledf, strata= sampledf$Individual, permutations=999)
+```
+###Deciphering the problem individual using a TUkeyHSD
+```{r}
+#Trying to see which individual causes the problem
+phoc <- with(sampledf, betadisper(Bones_bray, Individual)) 
+TukeyHSD(phoc) 
+```
+B appears to be the problem for the microbial eukaryotic communities.
+
+
+```{r}
+# Homogeneity of dispersion test
+beta <- betadisper(Bones_bray, sampledf$HumanCat)
+permutest(beta)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+7934

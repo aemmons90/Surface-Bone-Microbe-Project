@@ -1,0 +1,892 @@
+---
+title: "16S Trimmed Data Analysis"
+output:
+  html_document: 
+    keep_md: TRUE
+  
+
+date: 13 March 2018
+---
+##Introduction:
+Some of this code was modified from  http://deneflab.github.io/MicrobeMiseq/demos/mothur_2_phyloseq.html#permanova
+
+and
+
+https://rpubs.com/dillmcfarlan/R_microbiotaSOP
+```{r}
+#Loading required packages
+library(phyloseq)
+packageVersion("phyloseq")
+library(biomformat)
+packageVersion("biomformat")
+library(ggplot2)
+packageVersion("ggplot2")
+library(vegan)
+library(dplyr)
+library(scales)
+library(grid)
+library(reshape2)
+library(S4Vectors)
+library("DESeq2")
+packageVersion("DESeq2")
+library("plotly")
+library(viridis)
+library(ggpubr)
+library(cowplot)
+library(gridExtra)
+```
+
+##Importing Data
+```{r}
+# Assign variables for imported data
+sharedfile = "16S_surface_trimmed/stability.files.trim.trim.contigs.good.unique.good.filter.unique.precluster.pick.pick.opti_mcc.unique_list.shared"
+taxfile = "16S_surface_trimmed/stability.files.trim.trim.contigs.good.unique.good.filter.unique.precluster.pick.pick.opti_mcc.unique_list.0.03.cons.taxonomy"
+mapfile = "BoneSurface_metadata_16S.csv"
+
+```
+
+```{r}
+# Import mothur data
+mothur_data <- import_mothur(mothur_shared_file = sharedfile, mothur_constaxonomy_file = taxfile)
+
+# Import sample metadata
+map <- read.table(file = mapfile, sep = ',', header = TRUE)
+head(map)
+map$HumanCat<-as.factor(map$HumanCat)
+
+```
+In order for the PCoA and the NMDS to work, the variable cortical.content has to be transformed from an integer to a character vector.
+```{r}
+#make Cortical.Content into a character vector for later analysis
+map <- transform(map, Cortical.Category = as.character(Cortical.Category))
+map$ SEQ.ID-> map$Sample.ID
+map <- sample_data(map)
+# Assign rownames to be Sample ID's
+rownames(map) <- map$Sample.ID
+
+
+
+```
+
+```{r}
+# Merge mothurdata object with sample 
+moth_merge <- merge_phyloseq(mothur_data, map)
+moth_merge
+
+
+colnames(tax_table(moth_merge))
+colnames(tax_table(moth_merge)) <- c("Kingdom", "Phylum", "Class", "Order", "Family", "Genus")
+
+```
+##Filtering 
+Unwanted taxa will be filtered out. Though this was already done in Mothur, it is suggested in the tutorial and can serve as a kind of check. 
+```{r}
+#filter out Eukaryotes, Archaea, chloroplasts and mitochondria; note that this has already been done using mothur
+Bones1 <- moth_merge %>%
+  subset_taxa(Kingdom != "Eukaryota" | Family  != "mitochondria" | Class != "Chloroplast"
+  )
+
+Bones1
+
+```
+##Sample Summary
+This provides a summary of read counts in the sample.
+```{r}
+# Make a data frame with a column for the read counts of each sample
+sample_sum_df <- data.frame(Sample = sample_names(Bones1), sum = sample_sums(Bones1))
+
+# Histogram of sample read counts
+ggplot(sample_sum_df, aes(x = sum)) + 
+  geom_histogram(color = "black", fill = "indianred", binwidth = 2500) +
+  #ggtitle("Distribution of sample sequencing depth 16S rRNA") + 
+  xlab("Read counts") +
+  ylab("Sample sum")
+
+#ggsave("readdist.png", width = 5, height = 3, units="in", dpi=300)
+
+sample_sum_df1<- sample_sum_df %>%
+  arrange(sum)
+
+#Turn your 'treatment' column into a character vector
+sample_sum_df1$Sample <- as.character(sample_sum_df1$Sample)
+#Then turn it back into an ordered factor
+sample_sum_df1$Sample<- factor(sample_sum_df1$Sample, levels=unique(sample_sum_df1$Sample))
+
+ggplot(sample_sum_df1, aes(x = Sample, y=sum)) + 
+  geom_bar(stat= "Identity") +
+  ggtitle("Distribution of sample sequencing depth 16S rRNA") + 
+  xlab("library") +
+  ylab("read counts")+
+  theme(axis.text.x = element_text(angle = 90, vjust=0.5, hjust = 1))
+
+
+
+# mean, max and min of sample read counts
+smin <- min(sample_sums(Bones1))
+smean <- mean(sample_sums(Bones1))
+smax <- max(sample_sums(Bones1))
+
+print(smin) 
+print(smean)
+print(smax)
+
+```
+
+##Relative Abundance
+Stacked bar graphs can be created to look at relative abundance. The code has been modified to provide average relative abundance by bone type. 
+
+```{r}
+
+
+##Stacked bar plots
+# melt to long format (for ggploting) 
+# prune out phyla below 2% in each sample; i did this after averaging instead
+Bones_class <- Bones1 %>%
+  tax_glom(taxrank = "Class") %>%                     # agglomerate at Class level
+  transform_sample_counts(function(x) {x/sum(x)} ) %>% # Transform to rel. abundance
+  psmelt() %>%                                         # Melt to long format
+  #filter(Abundance > 0.02)  %>%                       # Filter out low abundance taxa
+  arrange(Body.region, BONE.TYPE)
+
+#there were two samples that did't sequence so the average for these will not be divided by three. See how many samples per bone type:
+map_Samp<- map %>% group_by(BONE.TYPE) %>% dplyr::summarise(n=n())
+
+
+#Average relative abundance of claSS by bone type. I have three replicates per treatment.need to first sum abundance by class to be divided by number of samples per group by merging data sets
+Bones_class_1 <- Bones_class %>% 
+  dplyr::arrange(OTU, Body.region, BONE.TYPE) %>% 
+  dplyr::group_by(Body.region, BONE.TYPE, Class) %>% 
+  dplyr::summarise(avg.rel.abund = mean(Abundance)) %>%
+  filter(avg.rel.abund > 0.02) #now can filter low abundance taxa
+
+#I have a ton of taxa so I need a lot of colors
+library(randomcoloR)
+n <- 60
+col_vector <- distinctColorPalette(n)
+
+# Plot #need to fix grid facet headers so that they fit
+ggplot(Bones_class_1, aes(x = BONE.TYPE, y = avg.rel.abund, fill = Class)) + 
+  facet_grid(~Body.region, scales="free", space="free") +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = col_vector) +
+# Remove x axis title
+theme(axis.title.x = element_blank()) + 
+  guides(fill = guide_legend(reverse = TRUE, keywidth = 1, keyheight = 1)) +
+  ylab("Average Relative Abundance (Class > 2%)") +
+ # ggtitle("Class Level Composition of Bone-Associated Bacterial Communities Averaged Across Individuals") +
+  theme(axis.text.x = element_text(angle = 90, vjust=0.5, hjust = 1)) +
+  theme(legend.position = "right") +
+  theme(legend.text=element_text(size=8)) 
+
+################################################
+#Looking at Phyla
+Bones_phylum <- Bones1 %>%
+  tax_glom(taxrank = "Phylum") %>%                     # agglomerate at Phylum level
+  transform_sample_counts(function(x) {x/sum(x)} ) %>% # Transform to rel. abundance
+  psmelt() %>%                                         # Melt to long format
+ 
+  arrange(Body.region, BONE.TYPE)
+
+
+#Average relative abundance of phyla by bone type. I have three replicates per treatment.need to first sum abundance by class to be divided by number of samples per group by merging data sets
+Bones_phylum_1 <- Bones_phylum %>%
+  dplyr::arrange(OTU, Body.region, BONE.TYPE) %>%
+  dplyr::group_by(Body.region, BONE.TYPE, Phylum) %>%
+  dplyr::summarise(avg.rel.abund = mean(Abundance))%>%
+  filter(avg.rel.abund > 0.02)
+
+#look at replicates
+merged2<-merge(Bones_phylum_1, map_Samp)
+
+#reorder factors for graphing
+Bones_phylum_1$Body.region<-factor(Bones_phylum_1$Body.region, levels=c("skull", "tooth",
+                                                          "upper trunk", "arm", "hand", "lower trunk", "leg", "foot"))
+
+#fix grid facet headers
+bodyRegion_names <- list(
+  'skull'= "Skull",
+  'tooth'= "Tooth",
+  'upper trunk'= "Upper Trunk",
+  'arm'= "Arm",
+  'hand'= "Hand",
+  'lower trunk'="Lower Trunk",
+  'leg'= "Leg",
+  'foot'= "Foot")
+  
+region_labeller <- function(variable,value){
+  return(bodyRegion_names[value])
+}
+
+#for unique colors
+library(randomcoloR)
+n <- 20
+palette <- distinctColorPalette(n)
+
+# Plot 
+ggplot(Bones_phylum_1, aes(x = BONE.TYPE, y = avg.rel.abund, fill = Phylum)) + 
+  facet_grid(.~Body.region, scales="free", space="free", labeller=region_labeller) +
+  geom_bar(stat = "identity", width=0.75) +
+  scale_fill_manual(values = palette) +
+  theme_classic()+
+# Remove x axis title
+theme(axis.title.x = element_blank()) + 
+  guides(fill = guide_legend(reverse = TRUE, keywidth = 0.5, keyheight = 0.5)) +
+  ylab("Average Relative Abundance (Phylum > 2%)") +
+  theme(axis.text.x = element_text(angle = 90, vjust=0.5, hjust = 1, size=8, color="black")) +
+  theme(legend.position = "bottom") +
+  theme(axis.text.y=element_text(size=8), strip.text.x =element_text(size=10, angle=90),axis.title.y=element_text(size=10))+
+  theme(legend.text = element_text(colour="black", size=10), 
+        legend.key.size = unit(0.5, "mm"), 
+        legend.title = element_text(size=10))+
+  theme(panel.spacing = unit(0.25, "lines"))
+  
+#ggsave("figure1b.png", units="in", width = 6.5, height = 5.5,  dpi=300, device="png")
+
+
+```
+
+Look at the ribs
+```{r}
+###look at family level
+Bones_family <- Bones1 %>%
+  tax_glom(taxrank = "Family") %>%                     # agglomerate at Class level
+  transform_sample_counts(function(x) {x/sum(x)} ) %>% # Transform to rel. abundance
+  psmelt() %>%                                         # Melt to long format
+  #filter(Abundance > 0.02)  %>%                       # Filter out low abundance taxa
+  arrange(Body.region, BONE.TYPE)
+
+
+#Average relative abundance of claSS by bone type. I have three replicates per treatment.need to first sum abundance by class to be divided by number of samples per group by merging data sets
+Bones_family_1 <- Bones_family %>% 
+  dplyr::arrange(Body.region, BONE.TYPE, OTU) %>% 
+  dplyr::group_by(Body.region, BONE.TYPE, Family) %>% 
+  dplyr::summarise(avg.rel.abund = mean(Abundance))
+
+
+###look at the ribs
+filter<-Bones_family_1%>% 
+  filter(BONE.TYPE == "12th rib"|BONE.TYPE == "1st rib"|BONE.TYPE == "middle rib") %>%
+   filter( avg.rel.abund > 0.01)
+ 
+
+#rename anything with "fa" as other because not at the family level
+filter$Family1<-gsub(".*_fa", "other", filter$Family, perl=TRUE) 
+filter$Family1<-gsub(".*Incertae_Sedis", "other", filter$Family1, perl=TRUE) 
+filter$Family1<-gsub(".*_unclassified", "other", filter$Family1, perl=TRUE) 
+filter$Family1<-gsub(".*uncultured", "other", filter$Family1, perl=TRUE) 
+
+filter$Family1<-gsub(".*Family_*.", "Clostridiaceae", filter$Family1, perl=TRUE) 
+
+
+#I have a ton of taxa so I need a lot of colors
+n <- 33
+palette <- distinctColorPalette(n)
+
+
+# Plot #need to fix grid facet headers so that they fit
+ribfamily<-ggplot(filter, aes(x = BONE.TYPE, y = avg.rel.abund, fill = Family1)) + 
+  #facet_grid(Individual~., scales="free", space="free") +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = palette) +
+# Remove x axis title
+theme(axis.title.x = element_blank()) + 
+  guides(fill = guide_legend(reverse = TRUE, keywidth = 1, keyheight = 1)) +
+  ylab("Average Relative Abundance (Family > 1%)") +
+  theme(axis.text.x = element_text(angle = 90, vjust=0.5, hjust = 1)) +
+  theme(legend.position = "right") +
+  theme(legend.text=element_text(size=8)) 
+
+
+
+#Average relative abundance of phylum for ribs
+Bones_phylum_1 <- Bones_phylum %>% 
+  dplyr::arrange(Body.region, BONE.TYPE, OTU) %>% 
+  dplyr::group_by(Body.region, BONE.TYPE, Phylum) %>% 
+  dplyr::summarise(avg.rel.abund = mean(Abundance))
+
+
+
+#looking at ribs only
+filter<-Bones_phylum_1 %>%
+  filter(BONE.TYPE == "12th rib"|BONE.TYPE == "1st rib"|BONE.TYPE == "middle rib") %>% filter(avg.rel.abund > 0.01)
+
+#get colors for the figure
+n <- 47
+palette <- distinctColorPalette(n)
+
+
+# code used for ribs and all three individuals
+ribphylum1<-
+  ggplot(filter, aes(x = BONE.TYPE, y = avg.rel.abund, fill = Phylum)) + 
+  #facet_grid(Individual~Body.region, scales="free", space="free") +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = palette) +
+# Remove x axis title
+  theme_bw()+
+theme(axis.title.x = element_blank()) + 
+  guides(fill = guide_legend(reverse = TRUE, keywidth = 0.5, keyheight = 0.5)) +
+  ylab("Relative Abundance (Phylum > 1%)") +
+  #ggtitle("Phylum Level Composition of Bone-Associated Bacterial Communities Averaged Across Individuals") +
+  theme(axis.text.x = element_text(angle = 90, vjust=0.5, hjust = 1, size=8,
+                                   family="Times New Roman", color="black")) +
+  theme(legend.position = "right") +
+  #theme(legend.text=element_text(size=10, family="Times New Roman"))+
+  theme(axis.text.y=element_text(size=8), strip.text.x = element_text(size=10, angle=90, family="Times New Roman"),
+        axis.title.y=element_text(size=10, family="Times New Roman"))+
+  theme(legend.text = element_text(colour="black", size=8, 
+                                     family="Times New Roman"), 
+        legend.key.size = unit(0.5, "mm"), 
+        legend.title = element_text(size=10, family="Times New Roman"))+
+  theme(panel.spacing = unit(0.25, "lines"))
+
+#ggsave("rel.abund.all.png", height= 6.5, width= 6.5, units="in", dpi=300)
+
+#ggsave("ribphylum1.png", height= 3.5, width= 5, units="in", dpi=300)
+```
+
+##Unconstrained Ordinations: PCoA
+Reads have to be scaled by even depth. 
+```{r}
+#use rarefy function
+Bones_scale1 = rarefy_even_depth(Bones1, rngseed = 1)
+# mean, max and min of sample read counts
+smin3 <- min(sample_sums(Bones_scale1))
+smean3 <- mean(sample_sums(Bones_scale1))
+smax3 <- max(sample_sums(Bones_scale1))
+
+print(smin3)
+print(smean3)
+print(smax3)
+
+#look at rarefaction curves
+library(ranacapa)
+p <- ggrare(Bones_scale1, step = 1000, color = "Individual", se = FALSE)+
+  theme(axis.text.x= element_text(angle=90))
+p <- p + facet_wrap(~Individual) +
+  theme(axis.text.x= element_text(angle=90))
+
+#ggsave("bactrarefy.png", height=3.5, width=5.5, units="in", dpi=300)
+
+```
+
+
+###NMDS
+```{r}
+#Performing an NMDS analysis
+#the stress is lower when k=3 and can use plotly to graph in 3D
+
+#create phyloseq objects by individual
+A_NMDS<-subset_samples(Bones_scale1, Individual=="A" )
+B_NMDS<-subset_samples(Bones_scale1, Individual=="B" )
+C_NMDS<-subset_samples(Bones_scale1, Individual=="C")
+mapNMDS<-sample_data((Bones_scale1))
+
+# Ordinate all together
+set.seed(6)
+bone_nmds<- ordinate(
+  physeq = Bones_scale1, 
+  method = "NMDS", 
+  distance = "bray",
+  trymax = 200,
+  k=3
+)
+
+#individual A
+set.seed(6)
+A_nmds <- ordinate(
+  physeq = A_NMDS, 
+  method = "NMDS", 
+  distance = "bray",
+  trymax = 200,
+  k=3
+)
+#individual B
+set.seed(6)
+B_nmds<- ordinate(
+  physeq = B_NMDS, 
+  method = "NMDS", 
+  distance = "bray",
+  trymax = 200,
+  k=3
+)
+#individual C
+set.seed(6)
+C_nmds<- ordinate(
+  physeq = C_NMDS, 
+  method = "NMDS", 
+  distance = "bray",
+  trymax = 200,
+  k=3
+)
+
+#plotting a k=3 NMDS for plotly
+Axyz = scores(A_nmds, display="sites")
+Bxyz = scores(B_nmds, display="sites")
+Cxyz = scores(C_nmds, display="sites")
+allxyz = scores(bone_nmds, display="sites")
+
+
+mapA<- mapNMDS %>% filter(Individual=="A")
+plot_ly(x=Axyz[,1], y=Axyz[,2], z=Axyz[,3], type="scatter3d", mode="markers", color=mapA$Body.region, colors=col_vector)
+
+plot_ly(x=Axyz[,1], y=Axyz[,2], z=Axyz[,3], type="scatter3d", mode="markers", color=mapA$HumanCat, colors=col_vector)
+
+mapB<- mapNMDS %>% filter(Individual=="B")
+plot_ly(x=Bxyz[,1], y=Bxyz[,2], z=Bxyz[,3], type="scatter3d", mode="markers", color=mapB$Body.region, colors=col_vector)
+
+plot_ly(x=Bxyz[,1], y=Bxyz[,2], z=Bxyz[,3], type="scatter3d", mode="markers", color=mapB$HumanCat, colors=col_vector)
+
+mapC<- mapNMDS %>% filter(Individual=="C")
+plot_ly(x=Cxyz[,1], y=Cxyz[,2], z=Cxyz[,3], type="scatter3d", mode="markers", color=mapC$Body.region)
+
+plot_ly(x=Cxyz[,1], y=Cxyz[,2], z=Cxyz[,3], type="scatter3d", mode="markers", color=mapC$HumanCat, colors=col_vector)
+
+plot_ly(x=allxyz[,1], y=allxyz[,2], z=allxyz[,3], type="scatter3d", mode="markers", color=mapNMDS$HumanCat, colors=col_vector)
+
+plot_ly(x=allxyz[,1], y=allxyz[,2], z=allxyz[,3], type="scatter3d", mode="markers", color=mapNMDS$Body.region, colors=col_vector, shape=mapNMDS$Individual)
+
+
+```
+
+###NMDS: Bone Region and Individual; plot individually
+```{r fig.width = 5, fig.height=3.5, r dpi= 300}
+
+all1<-plot_ordination(
+    physeq = Bones_scale1,
+    ordination = bone_nmds,
+    axes= 1:2,
+    shape = "Individual"
+    #title = "NMDS1:NMDS2"
+  ) + 
+  theme_bw()+
+  geom_point(aes(shape = Individual), alpha = 0.7, size = 1.0) +
+  #scale_fill_manual(values=c("grey", "black", "white"))+
+  #geom_point(colour = "grey90", size = 1.5) +
+  scale_shape_manual(values=c(0,19,8))+ 
+ #facet_grid(~Individual)+
+  stat_ellipse() +
+  theme(legend.position = "bottom")
+
+all2<-plot_ordination(
+    physeq = Bones_scale1,
+    ordination = bone_nmds,
+    axes= 3:2,
+    shape = "Individual"#,
+    #title = "NMDS2:NMDS3"
+  )  +
+  theme_bw()+
+  geom_point(aes(shape = Individual), alpha = 0.7, size = 1.0) +
+  #geom_point(colour = "grey90", size = 0.1) +
+  scale_shape_manual(values=c(0,19,8)) +
+  #facet_grid(~Individual)+
+  stat_ellipse() +
+   theme(legend.position = "bottom")
+
+#can i merge individual nmds ordinations and plot
+A2<-plot_ordination(
+    physeq = Bones_scale1,
+    ordination = A_nmds,
+    axes= 2:3,
+    color = "Body.region"#,
+    #title = "NMDS1:NMDS2"
+  ) + 
+  theme_bw()+
+  geom_point(aes(color = Body.region), alpha = 0.7, size = 0.1) +
+  #geom_point(colour = "grey90", size = 0.1) +
+  #scale_shape_manual(values=c(15,16,17,3,18,8,6,5))+ 
+  scale_color_manual(values=cbbPalette)+
+ facet_grid(~Individual)+
+  #stat_ellipse() 
+  theme(legend.position = "bottom")
+
+A1<-plot_ordination(
+    physeq = Bones_scale1,
+    ordination = A_nmds,
+    axes= 1:2,
+    color = "Body.region"#,
+    #title = "NMDS2:NMDS3"
+  )  +
+  theme_bw()+
+  geom_point(aes(color = Body.region), alpha = 0.7, size = 0.1) +
+  #geom_point(colour = "grey90", size = 0.1) +
+  #scale_shape_manual(values=c(15,16,17,3,18,8,6,5)) +
+  scale_color_manual(values = cbbPalette)+
+  facet_grid(~Individual)+
+  #stat_ellipse()+
+  guides(color=guide_legend(title="Body Region"))+
+  theme(legend.position = "bottom")
+  
+
+B1<-plot_ordination(
+    physeq = Bones_scale1,
+    ordination = B_nmds,
+    axes= 1:2,
+    color = "Body.region"#,
+    #title = "NMDS1:NMDS2"
+  ) + 
+  theme_bw()+
+  geom_point(aes(color = Body.region), alpha = 0.7, size = 0.1) +
+  #geom_point(colour = "grey90", size = 0.1) +
+  #scale_shape_manual(values=c(15,16,17,3,18,8,6,5))+ 
+  scale_color_manual(values=cbbPalette)+
+ facet_grid(~Individual)+
+  #stat_ellipse() +
+  theme(legend.position = "bottom")
+
+B2<-plot_ordination(
+    physeq = Bones_scale1,
+    ordination = B_nmds,
+    axes= 2:3,
+    color = "Body.region"#,
+    #title = "NMDS2:NMDS3"
+  )  +
+  theme_bw()+
+  geom_point(aes(color = Body.region), alpha = 0.7, size = 0.1) +
+  #geom_point(colour = "grey90", size = 0.1) +
+  #scale_shape_manual(values=c(15,16,17,3,18,8,6,5)) +
+  scale_color_manual(values=cbbPalette)+
+  facet_grid(~Individual)+
+  #stat_ellipse()+
+  theme(legend.position = "none")+
+  theme(legend.title = element_blank())
+
+
+C1<-plot_ordination(
+    physeq = Bones_scale1,
+    ordination = C_nmds,
+    axes= 1:2,
+    color = "Body.region"#,
+    #title = "NMDS1:NMDS2"
+  ) + 
+  theme_bw()+
+  geom_point(aes(color = Body.region), alpha = 0.7, size = 0.1) +
+  #geom_point(colour = "grey90", size = 0.1) +
+  #scale_shape_manual(values=c(15,16,17,3,18,8,6,5))+ 
+  scale_color_manual(values=cbbPalette)+
+ facet_grid(~Individual)+
+  #stat_ellipse() +
+  theme(legend.position = "none")
+
+C2<-plot_ordination(
+    physeq = Bones_scale1,
+    ordination = C_nmds,
+    axes= 3:2,
+    color = "Body.region"#,
+    #title = "NMDS2:NMDS3"
+  )  +
+  theme_bw()+
+  geom_point(aes(color = Body.region), alpha = 0.7, size = 0.1) +
+  #geom_point(colour = "grey90", size = 0.1) +
+  #scale_shape_manual(values=c(15,16,17,3,18,8,6,5)) +
+  scale_color_manual(values=cbbPalette)+
+  facet_grid(~Individual)+
+  #stat_ellipse()+
+  theme(legend.position = "none")+
+  theme(legend.title = element_blank())
+```
+
+
+#NMDS Human DNA Category and Individual
+```{r}
+plot_ordination(
+    physeq = Bones_scale1,
+    ordination = bone_nmds,
+    axes= 1:2,
+    color = "HumanCat",
+    shape = "Individual", 
+    title = "NMDS1:NMDS2"
+  ) + 
+  scale_color_manual(values = c( "#a65628", "red", "#ffae19",
+                                "#4daf4a", "#1919ff", "darkorchid3", "magenta", "darkmagenta")
+  ) +
+  geom_point(aes(color = HumanCat), alpha = 0.7, size = 4) +
+  geom_point(colour = "grey90", size = 1.5) +
+  scale_shape_manual(values=c(15,16,17))+ 
+facet_grid(~Individual)+
+  stat_ellipse(aes(group=HumanCat))
+
+plot_ordination(
+    physeq = Bones_scale1,
+    ordination = bone_nmds,
+    axes= 2:3,
+    color = "HumanCat",
+    shape = "Individual",
+    title = "NMDS2:NMDS3"
+  ) + 
+  scale_color_manual(values = c( "#a65628", "red", "#ffae19",
+                                "#4daf4a", "#1919ff", "darkorchid3", "magenta", "darkmagenta")
+  ) +
+  geom_point(aes(color = HumanCat), alpha = 0.7, size = 4) +
+  geom_point(colour = "grey90", size = 1.5) +
+  scale_shape_manual(values=c(15,16,17)) +
+  facet_grid(~Individual)+
+  stat_ellipse(aes(group=HumanCat))
+
+
+
+```
+
+##Permanova
+```{r}
+set.seed(1)
+
+#sample_data(Bones_scale1)$STR<-sample_data(Bones_scale1)$X..of.Loci..Human.DNA.quality.
+#sample_data(Bones_scale1)$STR<-as.character(sample_data(Bones_scale1)$STR)
+
+#remove NAs from cortical Category
+Bones_scale2<-subset_samples(Bones_scale1, !is.na(Cortical.Category))
+
+# Calculate bray curtis distance matrix
+set.seed(1)
+Bones_bray <- phyloseq::distance(Bones_scale2, method = "bray")
+
+# make a data frame from the sample_data
+set.seed(1)
+sampledf <- data.frame(sample_data(Bones_scale2))
+
+# Adonis test
+set.seed(1)
+adonis(Bones_bray ~ Individual, data = sampledf)
+
+#Adonis test with interactions
+set.seed(1)
+ adonis(Bones_bray ~ Individual*Body.region*HumanCat*Cortical.Category, data= sampledf, strata= sampledf$Individual, permutations=999)
+ 
+
+```
+
+##Look at dispersion
+```{r}
+# Homogeneity of dispersion test
+#run for each factor
+beta <- betadisper(Bones_bray, sampledf$HumanCat)
+permutest(beta)
+beta <- betadisper(Bones_bray, sampledf$Individual)
+permutest(beta)
+beta <- betadisper(Bones_bray, sampledf$Body.region)
+permutest(beta)
+beta <- betadisper(Bones_bray, sampledf$Cortical.Category)
+permutest(beta)
+
+
+
+```
+
+
+#look at stats by individual
+```{r}
+# Calculate bray curtis distance matrix for C
+Bones_bray <- phyloseq::distance(C_NMDS, method = "bray")
+# Adonis test for C
+C<-data.frame(sample_data(C_NMDS))
+adonis(Bones_bray ~ Body.region*HumanCat*Cortical.Category, data = C)
+
+#calculate bray curtis for A and adonis
+A<-data.frame(subset_samples(A_NMDS, !is.na(Cortical.Category)))
+Bones_bray2 <- phyloseq::distance(A_NMDS, method = "bray")
+adonis(Bones_bray2 ~ Body.region*HumanCat*Cortical.Category,data = A)
+
+#Lastly for B
+B<-data.frame(subset_samples(B_NMDS, !is.na(Cortical.Category)))
+Bones_bray3 <- phyloseq::distance(B_NMDS, method = "bray")
+adonis(Bones_bray3 ~ Body.region*HumanCat*Cortical.Category, data = B)
+
+```
+Communities significantly differ by Body region for all 3 individuals
+
+
+##Alpha Diversity using Phyloseq
+```{r}
+# Initialize matrices to store richness and evenness estimates
+nsamp = nsamples(Bones1)
+trials = 100
+
+richness <- matrix(nrow = nsamp, ncol = trials)
+row.names(richness) <- sample_names(Bones1)
+
+evenness <- matrix(nrow = nsamp, ncol = trials)
+row.names(evenness) <- sample_names(Bones1)
+
+# It is always important to set a seed when you subsample so your result is replicable 
+set.seed(3)
+
+for (i in 1:100) {
+  # Subsample
+  r <- rarefy_even_depth(Bones1, verbose = FALSE, replace = TRUE, rngseed = 3)
+  
+  # Calculate richness
+  rich <- as.numeric(as.matrix(estimate_richness(r, measures = "Observed")))
+  richness[ ,i] <- rich
+  
+  # Calculate evenness
+  even <- as.numeric(as.matrix(estimate_richness(r, measures = "InvSimpson")))
+  evenness[ ,i] <- even
+}
+
+#Let's calculate the mean and standard deviation per sample for observed richness and inverse simpson's index and store those values in a dataframe.
+
+# Create a new dataframe to hold the means and standard deviations of richness estimates
+SampleID <- row.names(richness)
+mean <- apply(richness, 1, mean)
+sd <- apply(richness, 1, sd)
+measure <- rep("Richness", nsamp)
+rich_stats <- data.frame(SampleID, mean, sd, measure)
+
+# Create a new dataframe to hold the means and standard deviations of evenness estimates
+SampleID <- row.names(evenness)
+mean <- apply(evenness, 1, mean)
+sd <- apply(evenness, 1, sd)
+measure <- rep("Inverse Simpson", nsamp)
+even_stats <- data.frame(SampleID, mean, sd, measure)
+```
+
+Combining richness and evenness in one data frame:
+```{r}
+alpha <- rbind(rich_stats, even_stats)
+```
+
+Adding Sample metadata:
+```{r}
+s <- data.frame(sample_data(Bones1))
+library(data.table)
+setnames(s, "Sample.ID", "SampleID")
+alphadiv <- merge(alpha, s, by = "SampleID") 
+```
+
+Plotting diversity measurements:
+
+```{r}
+alphadiv1 <- alphadiv %>%
+  group_by(Body.region)
+
+#Turn your 'treatment' column into a character vector
+alphadiv1$BONE.TYPE <- as.character(alphadiv1$BONE.TYPE)
+#Then turn it back into an ordered factor
+alphadiv1$BONE.TYPE <- factor(alphadiv1$BONE.TYPE, levels=unique(alphadiv1$BONE.TYPE))
+
+ggplot(alphadiv1, aes(x = BONE.TYPE, y =mean, group= Individual, color = factor(Body.region), shape = Individual)) +
+  geom_point(size = 2) +
+  geom_line(aes(group=Individual), colour="black")+
+  facet_wrap(~measure, ncol = 1, scales = "free") +
+  scale_color_manual(values = c("#a65628", "red", "#ffae19", "#4daf4a", "#1919ff", "darkorchid3", "magenta", "darkmagenta")) +
+  theme_classic()+
+  theme(axis.title.x = element_blank(), axis.title.y =element_blank(),legend.title = element_blank()) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust=0.5))+
+  geom_errorbar(aes(ymin=mean-sd, ymax=mean+sd), width=.2,
+                 position=position_dodge(0.1), colour="black")
+
+
+#divide back into two datasets with sample info
+richness<- filter(alphadiv1, measure == "Richness")
+invsimp<- filter(alphadiv1, measure == "Inverse Simpson")
+invsimp1<-mutate(invsimp, transHuman = log10(Human.DNA))
+
+#relationship between diversity and human DNA?
+ggplot(invsimp1, aes(x=transHuman, y=mean))+
+  geom_point()+
+  facet_grid(Individual~Body.region)+
+  geom_smooth(formula=y~x, method="lm")
+
+
+#load gpubr
+library(ggpubr)
+
+#create datasets by individual
+IA<-filter(invsimp, Individual=="A")
+IB<- filter(invsimp, Individual=="B")
+IC<- filter(invsimp, Individual=="C") 
+
+#compare means, requires ggpubr, continuously changed values for mutliple figures
+test<-compare_means(mean ~ Body.region,  data = IC, p.adjust.method="fdr")
+
+#can use for graphing
+#my_comparisons <- list( c("A", "B"), c("A", "C"), c("B", "C") )
+
+#can use for graphing
+#my_comparisons <- list( c("arm", "upper trunk"), c("arm", "lower trunk"), c("foot", "upper trunk"), c("leg", "tooth"), c("leg", "upper trunk"), c("lower trunk", "tooth"), c("foot", "tooth"), c("hand", "lower trunk"), c("hand", "upper trunk"), c("tooth","lower trunk"), c("tooth", "upper"), c("skull", "tooth"), c("skull", "upper trunk"))
+
+#run kruskal-wallis; this was used repeatedly on different datasets rather than rewriting code
+kruskal.test(mean~Body.region, data=richness)
+
+
+###invsimpson by individual; p-value cutoffs had to be tweaked because ggpubr doesnt use the adjusted p-value
+invSimpInd<-ggplot(invsimp, aes(x = Individual, y =mean, fill=Individual)) +
+  geom_boxplot() +
+  ylab("Inverse Simpson Index")+
+  xlab("Individual")+
+  #geom_point(size = 2) +
+  #geom_line(aes(group=Individual), colour="black")+
+  facet_wrap(~measure, ncol = 1, scales = "free") +
+  scale_color_manual(values = c("#a65628", "red", "#ffae19", "#4daf4a", "#1919ff", "darkorchid3", "magenta", "darkmagenta")) +
+  theme_classic()+
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust=0.5))+
+  stat_compare_means(label.x = "B", label.y= 160)+
+    theme(legend.position="none")
+
+ 
+###richness by individual
+RichInd<-ggplot(richness, aes(x = Individual, y =mean, fill=Individual)) +
+  geom_boxplot() +
+  #geom_point(size = 2) +
+  #geom_line(aes(group=Individual), colour="black")+
+  ylab("Richness (Observed)")+
+  xlab("Individual")+
+  facet_wrap(~measure, ncol = 1, scales = "free") +
+  scale_color_manual(values = c("#a65628", "red", "#ffae19", "#4daf4a", "#1919ff", "darkorchid3", "magenta", "darkmagenta")) +
+  theme_classic()+
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust=0.5))+
+  stat_compare_means(label.x = "B", label.y= 2500)+
+    theme(legend.position="none")
+
+
+###Richness by body region
+RichRegion<-ggplot(richness, aes(x = Body.region, y =mean, fill=Body.region)) +
+  geom_boxplot() +
+  ylab("Richness (Observed)")+
+  xlab("Body Region")+
+  facet_wrap(~measure, ncol = 1, scales = "free") +
+  scale_color_manual(values = c("#a65628", "red", "#ffae19", "#4daf4a", "#1919ff", "darkorchid3", "magenta", "darkmagenta")) +
+  theme_classic()+
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust=0.5))+
+  stat_compare_means(label.x = "leg", label.y= 3000)+
+  theme(legend.position="none")
+
+#ggsave("alphaRegionRich.png", height=3.5, width=5, units="in", dpi=300)
+
+
+InvRegion<-ggplot(invsimp, aes(x = Body.region, y =mean, fill=Body.region)) +
+  geom_boxplot() +
+  ylab("Inverse Simpson (Diversity)")+
+  xlab("Body Region")+
+  facet_grid(Individual~measure, scales = "free", space= "free") +
+  scale_color_manual(values = c("#a65628", "red", "#ffae19", "#4daf4a", "#1919ff", "darkorchid3", "magenta", "darkmagenta")) +
+  theme_classic()+
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust=0.5))+
+  stat_compare_means(label.x = "leg", label.y= 150)+
+  theme(legend.position="none")
+
+#ggsave("alphaRegionISimp.png", height=5, width=5, units="in", dpi=300)
+
+#put alpha diversity for body region in a table
+alphatab<-alphadiv1 %>% 
+  select(measure, Individual, Body.region, mean) %>%
+  group_by(measure, Individual, Body.region) %>%
+
+  summarise( sd= sd(mean),mean1= mean(mean))
+#individual summaries
+alphatabind<-alphadiv1 %>% 
+  select(measure, Individual, mean) %>%
+  group_by(measure, Individual) %>%
+  summarise( sd= sd(mean),mean1= mean(mean))
+
+
+#write.csv(alphatab,"alpha.csv")
+
+```
+
+
+
+
+
+
+
