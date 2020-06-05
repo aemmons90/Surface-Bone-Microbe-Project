@@ -1,5 +1,5 @@
 # Surface-Bone-Microbe-Project
-This respository contains files to accompany: Alexandra L. Emmons, Amy Z. Mundorff, Sarah W. Keenan, Jonathan Davoren, Janna Andronowski, David O. Carter, Jennifer M. DeBruyn*. Patterns of microbial colonization of human bone from surface-decomposed remains. Submitted to PLOS One, May 2019.
+This respository contains files to accompany: Alexandra L. Emmons, Amy Z. Mundorff, Sarah W. Keenan, Jonathan Davoren, Janna Andronowski, David O. Carter, Jennifer M. DeBruyn*. Characterizing the postmortem human bone microbiome from surface-decomposed remains. Submitted to PLOS One, May 2019.
 
 Microbial colonization of bone is an important mechanism of post-mortem skeletal degradation. However, the types and distributions of bone 
 and tooth colonizing microbes are not well characterized. It is unknown if microbial communities vary in abundance or composition between 
